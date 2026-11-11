@@ -1,0 +1,49 @@
+{
+    "camera": {
+        "camera_index": 0,
+        "width": 640,
+        "height": 480,
+        "inference_width": 480,
+        "inference_height": 270,
+        "target_fps": 30,
+        "flip_horizontal": true,
+        "low_light_threshold": 30.0,
+        "use_default_fallback": true
+    },
+    "active_region": {
+        "min_x": 0.2,
+        "min_y": 0.2,
+        "max_x": 0.8,
+        "max_y": 0.8
+    },
+    "mouse": {
+        "smoothing_alpha": 0.35,
+        "deadzone_pixels": 3.0,
+        "speed_multiplier": 1.0,
+        "drag_hold_delay_s": 0.25,
+        "scroll_factor": 1.5,
+        "scroll_deadzone": 0.015
+    },
+    "gestures": {
+        "fist_hold_duration_s": 1.0,
+        "pinch_distance_ratio": 0.055,
+        "pinch_release_ratio": 0.075,
+        "finger_straight_threshold": 0.12,
+        "fist_curl_threshold": 0.08,
+        "swipe_min_distance": 0.15,
+        "swipe_min_velocity": 0.45,
+        "swipe_window_s": 0.35,
+        "swipe_direction_ratio": 1.8,
+        "swipe_cooldown_s": 0.5,
+        "volume_step": 0.05,
+        "consecutive_frames_required": 3
+    },
+    "preferences": {
+        "dominant_hand": "Right",
+        "calibration_scale": 1.25,
+        "start_in_tray": false,
+        "show_landmark_skeleton": true,
+        "show_active_region_box": true,
+        "show_hud_stats": true
+    }
+}
