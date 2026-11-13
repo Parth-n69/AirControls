@@ -45,6 +45,11 @@ def build() -> int:
         f"--add-data={os.path.join(PROJECT_DIR, 'config.json')};.",
     ]
 
+    # Collect all dependencies for complex C++ and data packages
+    collect_all_args = [
+        "--collect-all=mediapipe",
+    ]
+
     # Hidden imports required by dynamic plugin loaders
     hidden_imports = [
         "--hidden-import=PySide6.QtCore",
@@ -56,6 +61,7 @@ def build() -> int:
         "--hidden-import=comtypes",
         "--hidden-import=pynput",
         "--hidden-import=pyautogui",
+        "--hidden-import=unicodedata",
     ]
 
     cmd = [
@@ -66,6 +72,7 @@ def build() -> int:
         "--onedir",             # Production onedir for fast startup
         "--windowed",           # Hide console in production
         "--clean",
+        *collect_all_args,
         *add_data_args,
         *hidden_imports,
         ENTRY_POINT,

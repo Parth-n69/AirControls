@@ -38,7 +38,7 @@ Control your computer seamlessly using mid-air hand gestures captured by your st
 
 ### 1. Requirements & Prerequisites
 - Python 3.10, 3.11, 3.12, or 3.14 (64-bit)
-- Standard USB or built-in webcam
+- Standard USB or built-in webcam (or use the built-in **Default Virtual Camera** if no webcam is present!)
 - Windows 10 / 11 (pycaw audio support)
 
 ### 2. Installation
@@ -55,9 +55,15 @@ pip install -r requirements.txt
 # Run desktop GUI
 python -m aircontrol.app
 
+# Or run the standalone Windows binary
+.\dist\AirControl\AirControl.exe
+
 # Or start directly in system tray
 python -m aircontrol.app --tray
 ```
+
+> **No Webcam? No Problem!**
+> If you don't have a webcam connected or your laptop's camera shutter is closed, AirControl automatically switches to the **Default Virtual Camera**. You can immediately test cursor movement, clicking, scrolling, volume, and swipes using the interactive **Gesture Quick-Select Deck** right in the UI (`[🔄 Auto Cycle]`, `[☝️ Move Cursor]`, `[👌 Pinch Click]`, `[✌️ Scroll]`, `[↔️ Swipe Nav]`, `[🔊 Swipe Volume]`, `[✊ Fist Hold]`). Whenever a physical webcam is connected, click **"Try Physical Webcam"** to switch over instantly.
 
 ---
 

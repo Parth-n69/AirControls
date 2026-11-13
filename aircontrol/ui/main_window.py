@@ -9,8 +9,9 @@ Features:
 """
 
 from __future__ import annotations
+import math
 import time
-from typing import Optional
+from typing import Optional, Dict
 import cv2
 import numpy as np
 
@@ -42,6 +43,7 @@ from aircontrol.ui.settings_dialog import SettingsDialog
 from aircontrol.ui.calibration_dialog import CalibrationDialog
 from aircontrol.ui.tray_icon import AirControlTrayIcon
 from aircontrol.utils.logger import get_logger
+from aircontrol.utils.synthetic import create_synthetic_hand
 
 logger = get_logger("main_window")
 
@@ -90,9 +92,11 @@ class MainWindow(QMainWindow):
         # Calibration Dialog reference
         self._calibration_dlg: Optional[CalibrationDialog] = None
 
-        # Demo simulation state
+        # Virtual / Default camera state
+        self._virtual_gesture_mode = "auto"
+        self._demo_start_time = time.time()
         self._demo_mode = False
-        self._demo_start_time = 0.0
+        self._gesture_buttons: Dict[str, QPushButton] = {}
 
         # 2. Build User Interface
         self._init_ui()
@@ -125,8 +129,8 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(18, 16, 18, 16)
-        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(18, 14, 18, 14)
+        main_layout.setSpacing(10)
 
         # Header Bar
         header_layout = QHBoxLayout()
@@ -151,6 +155,29 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(header_layout)
 
+        # Camera Source Status & Switch Deck
+        cam_bar = QFrame()
+        cam_bar.setStyleSheet("background-color: #111827; border: 1px solid #1e293b; border-radius: 6px; padding: 2px;")
+        cam_bar_layout = QHBoxLayout(cam_bar)
+        cam_bar_layout.setContentsMargins(12, 6, 12, 6)
+
+        self.cam_status_lbl = QLabel("📷 Camera: Default Virtual Camera (Ready - No webcam required)")
+        self.cam_status_lbl.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 12px;")
+        cam_bar_layout.addWidget(self.cam_status_lbl)
+
+        cam_bar_layout.addStretch()
+
+        self.cam_toggle_btn = QPushButton("Try Physical Webcam")
+        self.cam_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self.cam_toggle_btn.setStyleSheet("""
+            QPushButton { background-color: #1e293b; color: #cbd5e1; padding: 4px 12px; border-radius: 4px; border: 1px solid #334155; font-size: 11px; }
+            QPushButton:hover { background-color: #334155; color: white; }
+        """)
+        self.cam_toggle_btn.clicked.connect(self._toggle_camera_source)
+        cam_bar_layout.addWidget(self.cam_toggle_btn)
+
+        main_layout.addWidget(cam_bar)
+
         # Video Preview Container
         preview_container = QFrame()
         preview_layout = QVBoxLayout(preview_container)
@@ -158,11 +185,43 @@ class MainWindow(QMainWindow):
 
         self.video_label = QLabel("Initializing camera...")
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setMinimumSize(640, 420)
+        self.video_label.setMinimumSize(640, 400)
         self.video_label.setStyleSheet("background-color: #000000; border-radius: 6px;")
         preview_layout.addWidget(self.video_label)
 
         main_layout.addWidget(preview_container, stretch=1)
+
+        # Interactive Gesture Quick Selector Deck
+        gesture_deck = QFrame()
+        gesture_deck.setStyleSheet("background-color: #111827; border: 1px solid #1e293b; border-radius: 6px;")
+        gesture_deck_layout = QHBoxLayout(gesture_deck)
+        gesture_deck_layout.setContentsMargins(8, 6, 8, 6)
+        gesture_deck_layout.setSpacing(6)
+
+        deck_title = QLabel("Gesture Mode:")
+        deck_title.setStyleSheet("font-size: 11px; font-weight: bold; color: #64748b;")
+        gesture_deck_layout.addWidget(deck_title)
+
+        modes = [
+            ("auto", "🔄 Auto Cycle"),
+            ("point", "☝️ Move Cursor"),
+            ("pinch", "👌 Pinch Click"),
+            ("scroll", "✌️ Scroll"),
+            ("swipe", "↔️ Swipe Nav"),
+            ("volume", "🔊 Swipe Volume"),
+            ("fist", "✊ Fist (Toggle)"),
+        ]
+
+        self._gesture_buttons = {}
+        for mode_key, mode_label in modes:
+            btn = QPushButton(mode_label)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, m=mode_key: self._set_virtual_gesture_mode(m))
+            gesture_deck_layout.addWidget(btn)
+            self._gesture_buttons[mode_key] = btn
+
+        self._update_gesture_button_styles()
+        main_layout.addWidget(gesture_deck)
 
         # Telemetry & Status Cards
         cards_layout = QHBoxLayout()
@@ -198,14 +257,6 @@ class MainWindow(QMainWindow):
         """)
         self.settings_btn.clicked.connect(self._open_settings)
         footer_layout.addWidget(self.settings_btn)
-
-        self.demo_btn = QPushButton("Simulate Hand (Demo)")
-        self.demo_btn.setStyleSheet("""
-            QPushButton { background-color: #0369a1; color: white; padding: 8px 16px; border-radius: 6px; border: 1px solid #0284c7; font-weight: bold; }
-            QPushButton:hover { background-color: #0284c7; }
-        """)
-        self.demo_btn.clicked.connect(self._toggle_demo_mode)
-        footer_layout.addWidget(self.demo_btn)
 
         footer_layout.addStretch()
 
@@ -273,84 +324,183 @@ class MainWindow(QMainWindow):
         state_name = "ACTIVE" if is_act else "IDLE"
         self.tray_icon.show_notification("AirControl", f"Gesture Control is now {state_name}.")
 
-    def _toggle_demo_mode(self) -> None:
-        self._demo_mode = not self._demo_mode
-        if self._demo_mode:
-            self._demo_start_time = time.time()
-            self.demo_btn.setText("Stop Simulation")
-            self.demo_btn.setStyleSheet("""
-                QPushButton { background-color: #ea580c; color: white; padding: 8px 16px; border-radius: 6px; border: none; font-weight: bold; }
-                QPushButton:hover { background-color: #c2410c; }
-            """)
-            logger.info("Demo simulation mode activated.")
+    def _set_virtual_gesture_mode(self, mode: str) -> None:
+        self._virtual_gesture_mode = mode
+        self._demo_start_time = time.time()
+        self._update_gesture_button_styles()
+        logger.info("Virtual gesture mode set to '%s'.", mode)
+
+    def _update_gesture_button_styles(self) -> None:
+        for mode_key, btn in self._gesture_buttons.items():
+            if mode_key == self._virtual_gesture_mode:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #0284c7; color: white; padding: 5px 12px;
+                        border-radius: 4px; border: 1px solid #38bdf8; font-weight: bold; font-size: 11px;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #1e293b; color: #94a3b8; padding: 5px 12px;
+                        border-radius: 4px; border: 1px solid #334155; font-size: 11px;
+                    }
+                    QPushButton:hover { background-color: #334155; color: white; }
+                """)
+
+    def _toggle_camera_source(self) -> None:
+        if self.camera.is_default_camera:
+            success = self.camera.retry_hardware_camera()
+            if success:
+                self.cam_status_lbl.setText("📷 Camera: Physical Hardware Webcam (Connected)")
+                self.cam_status_lbl.setStyleSheet("color: #22c55e; font-weight: bold; font-size: 12px;")
+                self.cam_toggle_btn.setText("Use Default Camera")
+                self.tray_icon.show_notification("AirControl", "Connected to hardware webcam.")
+            else:
+                self.cam_status_lbl.setText("📷 Camera: Default Virtual Camera (Physical webcam unavailable)")
+                self.cam_status_lbl.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 12px;")
+                QMessageBox.information(
+                    self,
+                    "Webcam Not Detected",
+                    "Could not open hardware webcam index 0.\n\n"
+                    "AirControl is using the Default Virtual Camera so you can test all gestures.\n\n"
+                    "If you have a physical webcam:\n"
+                    "• Slide open any physical camera shutter above the screen\n"
+                    "• Check your keyboard camera hotkey (Fn + F8/F10)\n"
+                    "• Check Windows Settings > Privacy & security > Camera"
+                )
         else:
-            self.demo_btn.setText("Simulate Hand (Demo)")
-            self.demo_btn.setStyleSheet("""
-                QPushButton { background-color: #0369a1; color: white; padding: 8px 16px; border-radius: 6px; border: 1px solid #0284c7; font-weight: bold; }
-                QPushButton:hover { background-color: #0284c7; }
-            """)
-            logger.info("Demo simulation mode stopped.")
+            self.camera.switch_to_default_camera()
+            self.cam_status_lbl.setText("📷 Camera: Default Virtual Camera (Active)")
+            self.cam_status_lbl.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 12px;")
+            self.cam_toggle_btn.setText("Try Physical Webcam")
 
     def _process_frame_tick(self) -> None:
         """Periodic tick reading latest frame, running inference, and updating display."""
-        import math
         cam_frame = self.camera.get_latest_frame()
 
-        if self._demo_mode:
-            # Generate simulated frame and hand telemetry for demonstration
+        is_default = (
+            self.camera.is_default_camera
+            or (cam_frame is not None and getattr(cam_frame, "is_default_camera", False))
+            or not self.camera.is_connected
+            or self._demo_mode
+        )
+
+        if is_default:
             now = time.time()
-            t = (now - self._demo_start_time) % 20.0
+            t = (now - self._demo_start_time)
 
-            frame = np.full((480, 640, 3), 18, dtype=np.uint8)
-            frame[::40, :, :] = 32
-            frame[:, ::40, :] = 32
+            if cam_frame is not None:
+                frame = cam_frame.frame.copy()
+            else:
+                frame = np.full((480, 640, 3), 18, dtype=np.uint8)
+                frame[::40, :, :] = 32
+                frame[:, ::40, :] = 32
 
-            # Smooth Lissajous motion
-            wrist_x = 0.50 + 0.18 * math.cos(t * 1.5)
-            wrist_y = 0.65 + 0.12 * math.sin(t * 1.5)
+            mode = self._virtual_gesture_mode
+            if mode == "auto":
+                cycle_t = t % 21.0
+                if cycle_t < 4.0:
+                    effective_mode = "point"
+                    sub_t = cycle_t
+                elif cycle_t < 7.5:
+                    effective_mode = "pinch"
+                    sub_t = cycle_t - 4.0
+                elif cycle_t < 11.0:
+                    effective_mode = "scroll"
+                    sub_t = cycle_t - 7.5
+                elif cycle_t < 14.5:
+                    effective_mode = "swipe"
+                    sub_t = cycle_t - 11.0
+                elif cycle_t < 17.5:
+                    effective_mode = "volume"
+                    sub_t = cycle_t - 14.5
+                else:
+                    effective_mode = "fist"
+                    sub_t = cycle_t - 17.5
+            else:
+                effective_mode = mode
+                sub_t = t
 
             pinch_active = False
-            if t < 5.0:
-                ext = (False, True, False, False, False)  # Point
-            elif t < 8.0:
-                ext = (False, False, False, False, False)
-                pinch_active = True                       # Pinch
-            elif t < 12.0:
-                ext = (False, True, True, False, False)   # Two fingers
-                wrist_y = 0.60 + 0.15 * math.sin(t * 2.0)
-            elif t < 16.0:
-                ext = (False, True, True, True, False)   # Three fingers
-                wrist_y = 0.50 + 0.20 * math.sin(t * 2.0)
-            else:
-                ext = (True, True, True, True, True)     # Open palm
-                wrist_x = 0.35 + 0.30 * ((t - 16.0) / 4.0)
 
-            from aircontrol.utils.synthetic import create_synthetic_hand
+            if effective_mode == "point":
+                # Index finger up, smooth figure-8 / oval motion inside active area
+                ext = (False, True, False, False, False)
+                wrist_x = 0.50 + 0.16 * math.cos(sub_t * 1.5)
+                wrist_y = 0.55 + 0.12 * math.sin(sub_t * 2.0)
+
+            elif effective_mode == "pinch":
+                # Periodic pinch and release
+                ext = (False, False, False, False, False)
+                pinch_cycle = sub_t % 1.5
+                pinch_active = (pinch_cycle < 0.9)
+                wrist_x = 0.50 + 0.05 * math.cos(sub_t)
+                wrist_y = 0.55 + 0.05 * math.sin(sub_t)
+
+            elif effective_mode == "scroll":
+                # Two fingers up, moving vertically
+                ext = (False, True, True, False, False)
+                wrist_x = 0.50
+                wrist_y = 0.55 + 0.15 * math.sin(sub_t * 2.5)
+
+            elif effective_mode == "swipe":
+                # Open palm, horizontal fast swipe every 1.6s
+                ext = (True, True, True, True, True)
+                swipe_cycle = sub_t % 1.6
+                if swipe_cycle < 0.45:
+                    wrist_x = 0.25 + 0.50 * (swipe_cycle / 0.45)
+                else:
+                    wrist_x = 0.50
+                wrist_y = 0.55
+
+            elif effective_mode == "volume":
+                # Open palm, vertical fast swipe every 1.6s
+                ext = (True, True, True, True, True)
+                vol_cycle = sub_t % 1.6
+                if vol_cycle < 0.45:
+                    wrist_y = 0.75 - 0.45 * (vol_cycle / 0.45)
+                else:
+                    wrist_y = 0.55
+                wrist_x = 0.50
+
+            elif effective_mode == "fist":
+                # All fingers curled, steady hold
+                ext = (False, False, False, False, False)
+                wrist_x = 0.50
+                wrist_y = 0.60
+
+            else:
+                ext = (True, True, True, True, True)
+                wrist_x = 0.50
+                wrist_y = 0.55
+
             dominant_hand = create_synthetic_hand(
                 wrist=(wrist_x, wrist_y),
                 hand_span=0.20,
                 finger_extensions=ext,
                 pinch=pinch_active,
             )
-            track_res_inf_time = 8.5
-            cam_fps = 30.0
+            track_res_inf_time = 4.2
+            cam_fps = cam_frame.fps if cam_frame else 30.0
             is_low_light = False
 
-        elif cam_frame is None:
-            if not self.camera.is_connected:
-                self.video_label.setText(
-                    "📷 Integrated Camera Not Open / Unavailable\n\n"
-                    "• Physical Shutter: Check the small sliding switch above your laptop screen\n"
-                    "  (slide it open to reveal the camera lens).\n\n"
-                    "• Keyboard Privacy Key: Press Fn + F8 (or your camera hotkey)\n"
-                    "  to toggle hardware camera privacy.\n\n"
-                    "• Windows Camera Settings: Open Windows Settings > Privacy & security > Camera\n"
-                    "  and ensure 'Let desktop apps access your camera' is ON.\n\n"
-                    "AirControl is auto-retrying every 2s...\n"
-                    "(Or click 'Simulate Hand (Demo)' below to test without camera!)"
-                )
-            return
+            # Draw visual badge on frame indicating default virtual camera
+            cv2.putText(
+                frame,
+                "DEFAULT CAMERA (VIRTUAL FEED)",
+                (20, frame.shape[0] - 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.52,
+                (240, 180, 50),
+                1,
+                cv2.LINE_AA,
+            )
+
         else:
+            # Physical camera stream
+            if cam_frame is None:
+                return
             now = cam_frame.timestamp
             frame = cam_frame.frame.copy()
             if self.config.camera.flip_horizontal:

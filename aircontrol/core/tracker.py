@@ -15,7 +15,13 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 import cv2
 import numpy as np
-import mediapipe as mp
+
+try:
+    import mediapipe as mp
+    HAS_MEDIAPIPE = True
+except (ImportError, ModuleNotFoundError):
+    mp = None
+    HAS_MEDIAPIPE = False
 
 from aircontrol.utils.logger import get_logger
 from aircontrol.utils.math_helpers import euclidean_distance_2d
@@ -147,7 +153,7 @@ class HandTracker:
                 logger.warning("Failed to initialize MediaPipe Tasks API: %s. Trying legacy solutions.", exc)
 
         # 2. Fallback to Legacy mp.solutions.hands if present
-        if hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
+        if mp is not None and hasattr(mp, "solutions") and hasattr(mp.solutions, "hands"):
             try:
                 self._legacy_hands = mp.solutions.hands.Hands(
                     static_image_mode=False,
